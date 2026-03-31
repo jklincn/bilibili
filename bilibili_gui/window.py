@@ -82,6 +82,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.download_path = ""
         self._compact_window_width = 1060
         self._compact_window_height = 470
+        self._hero_logo_top_margin = 20
+        self._content_top_gap = 0
 
         self.setWindowFlags(
             QtCore.Qt.WindowType.Window | QtCore.Qt.WindowType.FramelessWindowHint
@@ -100,27 +102,30 @@ class MainWindow(QtWidgets.QMainWindow):
     def _build_ui(self) -> None:
         self.central = QtWidgets.QWidget()
         self.central.setObjectName("CentralCanvas")
+        self.central.installEventFilter(self)
         self.setCentralWidget(self.central)
 
         root_layout = QtWidgets.QVBoxLayout(self.central)
-        root_layout.setContentsMargins(10, 10, 10, 10)
+        root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
 
         self.window_surface = QtWidgets.QFrame()
         self.window_surface.setObjectName("WindowSurface")
+        self.window_surface.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        self.window_surface.installEventFilter(self)
         root_layout.addWidget(self.window_surface)
 
         outer_layout = QtWidgets.QVBoxLayout(self.window_surface)
-        outer_layout.setContentsMargins(20, 14, 20, 20)
-        outer_layout.setSpacing(12)
+        outer_layout.setContentsMargins(0, 0, 0, 14)
+        outer_layout.setSpacing(8)
 
         self.title_bar = QtWidgets.QWidget()
         self.title_bar.setObjectName("TitleBar")
-        self.title_bar.setFixedHeight(42)
+        self.title_bar.setFixedHeight(40)
         self.title_bar.installEventFilter(self)
         title_layout = QtWidgets.QHBoxLayout(self.title_bar)
-        title_layout.setContentsMargins(0, 0, 2, 0)
-        title_layout.setSpacing(2)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(0)
         title_layout.addStretch(1)
 
         self.minimize_button = QtWidgets.QToolButton()
@@ -144,7 +149,7 @@ class MainWindow(QtWidgets.QMainWindow):
         outer_layout.addWidget(self.title_bar)
 
         top_row = QtWidgets.QHBoxLayout()
-        top_row.setContentsMargins(0, 0, 0, 0)
+        top_row.setContentsMargins(20, 2, 20, 0)
 
         self.log_toggle_button = QtWidgets.QPushButton("显示日志")
         self.log_toggle_button.setObjectName("FloatingLogButton")
@@ -157,9 +162,9 @@ class MainWindow(QtWidgets.QMainWindow):
         outer_layout.addLayout(top_row)
 
         self.body_layout = QtWidgets.QVBoxLayout()
-        self.body_layout.setContentsMargins(0, 0, 0, 0)
+        self.body_layout.setContentsMargins(20, 0, 20, 0)
         self.body_layout.setSpacing(0)
-        self.body_layout.addStretch(1)
+        self.body_layout.addSpacing(self._content_top_gap)
 
         self.content_shell = QtWidgets.QWidget()
         self.content_shell.setMinimumWidth(820)
@@ -182,7 +187,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.hero_card = self._make_card("HeroCard")
         hero_layout = QtWidgets.QVBoxLayout(self.hero_card)
-        hero_layout.setContentsMargins(28, 28, 28, 26)
+        hero_layout.setContentsMargins(28, self._hero_logo_top_margin, 28, 24)
         hero_layout.setSpacing(18)
 
         self.hero_logo = QtSvgWidgets.QSvgWidget(str(static_asset("Bilibili_logo_1.svg")))
@@ -218,7 +223,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.hero_status_bar.hide()
 
         hero_layout.addWidget(self.hero_logo, 0, QtCore.Qt.AlignmentFlag.AlignHCenter)
-        hero_layout.addSpacing(18)
+        hero_layout.addSpacing(60)
         hero_layout.addLayout(url_row)
         hero_layout.addWidget(self.hero_status_label)
         hero_layout.addWidget(self.hero_status_bar)
@@ -368,12 +373,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._sync_caption_buttons()
 
     def _sync_caption_buttons(self) -> None:
-        self.minimize_button.setText("—")
-        self.maximize_button.setText("❐" if self.isMaximized() else "▢")
+        self.minimize_button.setText("─")
+        self.maximize_button.setText("❐" if self.isMaximized() else "□")
         self.close_button.setText("✕")
 
     def _update_content_mode(self, results_visible: bool) -> None:
-        self.body_layout.setStretch(0, 1 if not results_visible else 0)
         self.body_layout.setStretch(2, 2 if not results_visible else 1)
 
     def _set_log_visibility(self, visible: bool) -> None:
@@ -415,24 +419,55 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._shrink_for_compact if not self.info_card.isVisible() else self._center_on_screen,
             )
 
+    def _is_caption_control_hit(self, widget: QtWidgets.QWidget | None) -> bool:
+        caption_controls = {
+            getattr(self, "minimize_button", None),
+            getattr(self, "maximize_button", None),
+            getattr(self, "close_button", None),
+            getattr(self, "log_toggle_button", None),
+        }
+        current = widget
+        while current is not None:
+            if current in caption_controls:
+                return True
+            current = current.parentWidget()
+        return False
+
+    def _is_in_drag_zone(self, global_pos: QtCore.QPoint) -> bool:
+        local = self.window_surface.mapFromGlobal(global_pos)
+        return (
+            0 <= local.x() < self.window_surface.width()
+            and 0 <= local.y() <= self.title_bar.height()
+        )
+
     def eventFilter(self, watched: QtCore.QObject, event: QtCore.QEvent) -> bool:
-        if watched is self.title_bar:
+        if not all(
+            hasattr(self, name) for name in ("central", "window_surface", "title_bar")
+        ):
+            return super().eventFilter(watched, event)
+        if watched in {self.title_bar, self.window_surface, self.central}:
             if (
                 event.type() == QtCore.QEvent.Type.MouseButtonDblClick
                 and isinstance(event, QtGui.QMouseEvent)
                 and event.button() == QtCore.Qt.MouseButton.LeftButton
             ):
-                self._toggle_maximize_restore()
-                return True
+                global_pos = event.globalPosition().toPoint()
+                hit_widget = QtWidgets.QApplication.widgetAt(global_pos)
+                if not self._is_caption_control_hit(hit_widget) and self._is_in_drag_zone(global_pos):
+                    self._toggle_maximize_restore()
+                    return True
             if (
                 event.type() == QtCore.QEvent.Type.MouseButtonPress
                 and isinstance(event, QtGui.QMouseEvent)
                 and event.button() == QtCore.Qt.MouseButton.LeftButton
             ):
-                handle = self.windowHandle()
-                if handle is not None and not self.isMaximized():
-                    handle.startSystemMove()
-                    return True
+                global_pos = event.globalPosition().toPoint()
+                hit_widget = QtWidgets.QApplication.widgetAt(global_pos)
+                if not self._is_caption_control_hit(hit_widget) and self._is_in_drag_zone(global_pos):
+                    handle = self.windowHandle()
+                    if handle is not None and not self.isMaximized():
+                        handle.startSystemMove()
+                        return True
         return super().eventFilter(watched, event)
 
     def _center_on_screen(self) -> None:
@@ -526,7 +561,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     stop: 1 #f2f6fd
                 );
                 border: 1px solid rgba(36, 44, 58, 0.22);
-                border-radius: 28px;
+                border-radius: 8px;
             }
             QWidget#TitleBar {
                 background: transparent;
@@ -710,38 +745,42 @@ class MainWindow(QtWidgets.QMainWindow):
                 border-color: #2367d6;
             }
             QPushButton#FloatingLogButton, QPushButton#OverlayCloseButton {
-                min-height: 40px;
+                min-height: 36px;
                 padding: 0 16px;
                 font-size: 13px;
             }
             QToolButton#CaptionButton, QToolButton#CloseCaptionButton {
                 background: transparent;
                 border: none;
-                border-radius: 8px;
-                min-width: 38px;
-                max-width: 38px;
-                min-height: 30px;
-                max-height: 30px;
+                border-radius: 0;
+                min-width: 48px;
+                max-width: 48px;
+                min-height: 40px;
+                max-height: 40px;
                 padding: 0;
-                font-size: 12px;
+                font-family: "Segoe UI Symbol", "Microsoft YaHei UI", "Microsoft JhengHei UI";
+                font-size: 16px;
                 font-weight: 500;
-                color: #3d4f63;
+                color: #2f3f52;
+            }
+            QToolButton#CloseCaptionButton {
+                border-top-right-radius: 8px;
             }
             QToolButton#CaptionButton:hover {
                 background: rgba(40, 52, 68, 0.10);
-                color: #1a2d43;
+                color: #18283b;
             }
             QToolButton#CaptionButton:pressed {
                 background: rgba(40, 52, 68, 0.16);
-                color: #10243a;
+                color: #0f2238;
             }
             QToolButton#CloseCaptionButton:hover {
-                background: rgba(232, 62, 86, 0.14);
-                color: #b42335;
+                background: #e81123;
+                color: white;
             }
             QToolButton#CloseCaptionButton:pressed {
-                background: rgba(232, 62, 86, 0.2);
-                color: #9c1f30;
+                background: #c50f1f;
+                color: white;
             }
             QPushButton:disabled {
                 background: #f3f5f8;
