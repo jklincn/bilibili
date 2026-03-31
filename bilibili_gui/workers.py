@@ -85,6 +85,10 @@ class DownloadWorker(QtCore.QObject):
         self._process: subprocess.Popen[bytes] | None = None
         self._final_path = ""
         self._started_at = 0.0
+        self._initial_files: set[Path] = set()
+        self._last_progress_value = 0
+        self._last_speed_text = ""
+        self._last_eta_text = ""
 
     def cancel(self) -> None:
         self._cancel_event.set()
@@ -95,8 +99,15 @@ class DownloadWorker(QtCore.QObject):
     def run(self) -> None:
         try:
             command = build_download_command(self.url, self.save_dir, self.option, self.binaries)
-            self.log.emit(f"开始下载，格式 {self.option.format_id}，保存到 {self.save_dir}")
+            self.log.emit(
+                f"\u5f00\u59cb\u4e0b\u8f7d\uff0c\u683c\u5f0f {self.option.format_id}\uff0c\u4fdd\u5b58\u5230 {self.save_dir}"
+            )
             self._started_at = time.time()
+            self._initial_files = {
+                path.resolve()
+                for path in self.save_dir.iterdir()
+                if path.is_file()
+            } if self.save_dir.exists() else set()
 
             self._process = subprocess.Popen(
                 command,
@@ -105,6 +116,7 @@ class DownloadWorker(QtCore.QObject):
                 creationflags=CREATE_NO_WINDOW,
                 env=build_subprocess_env(),
             )
+            threading.Thread(target=self._monitor_download_size, daemon=True).start()
 
             last_lines: list[str] = []
             assert self._process.stdout is not None
@@ -113,12 +125,30 @@ class DownloadWorker(QtCore.QObject):
                 line = decode_subprocess_output(raw_line).strip()
                 if not line:
                     continue
-                if line.startswith("PROGRESS|"):
-                    value, percent_text, speed_text, eta_text = parse_progress_line(line)
-                    self.progress.emit(value, percent_text, speed_text, eta_text)
+
+                progress_line = line
+                if progress_line.startswith("download:PROGRESS|"):
+                    progress_line = progress_line.split("download:", 1)[1]
+                if progress_line.startswith("PROGRESS|"):
+                    value, percent_text, speed_text, eta_text = parse_progress_line(progress_line)
+                    self._last_progress_value = max(self._last_progress_value, value)
+                    if speed_text:
+                        self._last_speed_text = speed_text
+                    if eta_text:
+                        self._last_eta_text = eta_text
+                    self.progress.emit(
+                        self._last_progress_value,
+                        percent_text,
+                        self._last_speed_text,
+                        self._last_eta_text,
+                    )
                     continue
-                if line.startswith("FILE|"):
-                    self._final_path = line.split("|", 1)[1].strip()
+
+                file_line = line
+                if file_line.startswith("after_move:FILE|"):
+                    file_line = file_line.split("after_move:", 1)[1]
+                if file_line.startswith("FILE|"):
+                    self._final_path = file_line.split("|", 1)[1].strip()
                     continue
 
                 last_lines.append(line)
@@ -134,10 +164,10 @@ class DownloadWorker(QtCore.QObject):
                 return
 
             if return_code != 0:
-                error_text = "\n".join(last_lines) or "yt-dlp 下载失败"
+                error_text = "\n".join(last_lines) or "yt-dlp \u4e0b\u8f7d\u5931\u8d25"
                 raise RuntimeError(error_text)
 
-            self.progress.emit(100, "100%", "完成", "0s")
+            self.progress.emit(100, "100%", "\u5b8c\u6210", "0s")
             self.completed.emit(self._resolve_final_path())
         except Exception as exc:  # pragma: no cover - UI path
             self.error.emit(str(exc))
@@ -146,7 +176,11 @@ class DownloadWorker(QtCore.QObject):
 
     def _resolve_final_path(self) -> str:
         if self._final_path and "\ufffd" not in self._final_path:
-            return self._final_path
+            try:
+                if Path(self._final_path).exists():
+                    return self._final_path
+            except OSError:
+                pass
 
         candidates: list[Path] = []
         if self.video_id:
@@ -175,3 +209,61 @@ class DownloadWorker(QtCore.QObject):
         if candidates:
             return str(candidates[0])
         return self._final_path or str(self.save_dir)
+
+
+    def _monitor_download_size(self) -> None:
+        total_bytes = self.option.estimated_filesize or self.option.filesize
+        if not total_bytes:
+            return
+
+        while not self._cancel_event.is_set():
+            process = self._process
+            if process is None:
+                time.sleep(0.2)
+                continue
+            if process.poll() is not None:
+                break
+
+            downloaded_bytes = self._estimate_downloaded_bytes()
+            if downloaded_bytes > 0:
+                percent = min(downloaded_bytes / total_bytes * 100, 99.0)
+                value = max(self._last_progress_value, int(percent))
+                if value > self._last_progress_value:
+                    self._last_progress_value = value
+                    self.progress.emit(
+                        value,
+                        f"{percent:.1f}%",
+                        self._last_speed_text,
+                        self._last_eta_text,
+                    )
+
+            time.sleep(0.35)
+
+    def _estimate_downloaded_bytes(self) -> int:
+        if not self.save_dir.exists():
+            return 0
+
+        partial_total = 0
+        output_total = 0
+        recent_threshold = self._started_at - 1
+
+        for path in self.save_dir.iterdir():
+            try:
+                if not path.is_file():
+                    continue
+                stat = path.stat()
+                resolved = path.resolve()
+            except OSError:
+                continue
+
+            is_recent = resolved not in self._initial_files or stat.st_mtime >= recent_threshold
+            if not is_recent:
+                continue
+
+            lowered = path.name.lower()
+            if lowered.endswith('.part') or '.part-frag' in lowered or lowered.endswith('.ytdl'):
+                partial_total += stat.st_size
+            else:
+                output_total += stat.st_size
+
+        return max(partial_total, output_total)

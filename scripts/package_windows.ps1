@@ -8,6 +8,8 @@ Set-StrictMode -Version Latest
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $SpecPath = Join-Path $ProjectRoot "bilibili.spec"
+$IconSource = Join-Path $ProjectRoot "static\\Bilibili_logo_2.webp"
+$IconTarget = Join-Path $ProjectRoot "static\\Bilibili_logo_2.ico"
 $BuildRoot = Join-Path $ProjectRoot "build"
 $DistRoot = Join-Path $ProjectRoot "dist"
 $BundleDir = Join-Path $DistRoot "bilibili"
@@ -16,7 +18,7 @@ $SourceBinDir = Join-Path $ProjectRoot "bin"
 $BundleBinDir = Join-Path $BundleDir "bin"
 $ArchivePath = Join-Path $DistRoot $ArchiveName
 $ArchiveHelper = Join-Path $ProjectRoot "scripts\\make_7z.py"
-$RequiredBinaries = @("ffmpeg.exe", "ffprobe.exe", "yt-dlp.exe")
+$RequiredBinaries = @("ffmpeg.exe", "yt-dlp.exe")
 
 function Resolve-CommandPath {
     param([Parameter(Mandatory = $true)][string]$Name)
@@ -29,6 +31,11 @@ function Resolve-CommandPath {
 }
 
 function Resolve-PythonCommand {
+    $VenvPython = Join-Path $ProjectRoot ".venv\\Scripts\\python.exe"
+    if (Test-Path $VenvPython) {
+        return @($VenvPython)
+    }
+
     $Python = Resolve-CommandPath -Name "python"
     if ($Python) {
         return @($Python)
@@ -96,6 +103,10 @@ if (-not (Test-Path $ArchiveHelper)) {
     throw "Missing archive helper script: $ArchiveHelper"
 }
 
+if (-not (Test-Path $IconSource)) {
+    throw "Missing icon source file: $IconSource"
+}
+
 $Uv = Resolve-CommandPath -Name "uv"
 $PythonCommand = Resolve-PythonCommand
 
@@ -109,6 +120,13 @@ Remove-Item $ArchivePath -Force -ErrorAction SilentlyContinue
 
 Push-Location $ProjectRoot
 try {
+    if ($Uv) {
+        Invoke-Native @($Uv, "run", "python", "scripts\\convert_icon.py", $IconSource, $IconTarget)
+    }
+    else {
+        Invoke-Native ($PythonCommand + @("scripts\\convert_icon.py", $IconSource, $IconTarget))
+    }
+
     if ($Uv) {
         Invoke-Native @(
             $Uv,

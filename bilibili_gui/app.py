@@ -6,6 +6,7 @@ import sys
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from .core import static_asset
 from .window import MainWindow
 
 
@@ -26,13 +27,37 @@ def configure_windows_dpi() -> None:
             pass
 
 
+def configure_windows_app_id() -> None:
+    if sys.platform != "win32":
+        return
+
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "Jklin.BilibiliDownloader"
+        )
+    except Exception:
+        pass
+
+
+def application_icon() -> QtGui.QIcon:
+    for icon_path in (
+        static_asset("Bilibili_logo_2.ico"),
+        static_asset("Bilibili_logo_2.webp"),
+    ):
+        if icon_path.exists():
+            return QtGui.QIcon(str(icon_path))
+    return QtGui.QIcon()
+
+
 def build_application() -> QtWidgets.QApplication:
     configure_windows_dpi()
+    configure_windows_app_id()
     QtGui.QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
         QtCore.Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
     app = QtWidgets.QApplication(sys.argv)
     app.setStyle("Fusion")
+    app.setWindowIcon(application_icon())
 
     for family in (
         "Segoe UI Variable Text",
@@ -49,5 +74,6 @@ def build_application() -> QtWidgets.QApplication:
 def main() -> int:
     app = build_application()
     window = MainWindow()
+    window.setWindowIcon(application_icon())
     window.show()
     return app.exec()

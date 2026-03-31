@@ -35,14 +35,13 @@ SUBPROCESS_ENCODINGS = tuple(
 class BinaryPaths:
     yt_dlp: Path
     ffmpeg: Path
-    ffprobe: Path
 
     @property
     def ffmpeg_dir(self) -> Path:
         return self.ffmpeg.parent
 
     def missing(self) -> list[Path]:
-        return [path for path in (self.yt_dlp, self.ffmpeg, self.ffprobe) if not path.exists()]
+        return [path for path in (self.yt_dlp, self.ffmpeg) if not path.exists()]
 
 
 @dataclass(slots=True)
@@ -55,6 +54,7 @@ class FormatOption:
     vcodec: str
     acodec: str
     filesize: int | None
+    estimated_filesize: int | None
     note: str
     is_h264: bool
 
@@ -82,7 +82,7 @@ class FormatOption:
 
     @property
     def size_label(self) -> str:
-        return humanize_bytes(self.filesize)
+        return humanize_bytes(self.estimated_filesize or self.filesize)
 
     @property
     def download_selector(self) -> str:
@@ -95,6 +95,22 @@ def app_root() -> Path:
     if getattr(sys, "frozen", False) or "__compiled__" in globals():
         return Path(sys.argv[0]).resolve().parent
     return Path(__file__).resolve().parent.parent
+
+
+def resource_root() -> Path:
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        return Path(meipass)
+
+    root = app_root()
+    internal_root = root / "_internal"
+    if internal_root.exists():
+        return internal_root
+    return root
+
+
+def static_asset(*parts: str) -> Path:
+    return resource_root() / "static" / Path(*parts)
 
 
 def runtime_temp_dir() -> Path:
@@ -132,7 +148,6 @@ def discover_binaries() -> BinaryPaths:
     return BinaryPaths(
         yt_dlp=bin_dir / "yt-dlp.exe",
         ffmpeg=bin_dir / "ffmpeg.exe",
-        ffprobe=bin_dir / "ffprobe.exe",
     )
 
 
@@ -165,8 +180,27 @@ def is_h264_codec(codec: str | None) -> bool:
     return "avc" in lowered or "h264" in lowered
 
 
+def pick_best_audio_size(metadata: dict[str, Any]) -> int | None:
+    best_audio_size: int | None = None
+    for fmt in metadata.get("formats") or []:
+        vcodec = str(fmt.get("vcodec") or "")
+        acodec = str(fmt.get("acodec") or "")
+        if vcodec not in {"", "none"}:
+            continue
+        if not acodec or acodec in {"none", "unknown"}:
+            continue
+        filesize = fmt.get("filesize") or fmt.get("filesize_approx")
+        if not filesize:
+            continue
+        size_value = int(filesize)
+        if best_audio_size is None or size_value > best_audio_size:
+            best_audio_size = size_value
+    return best_audio_size
+
+
 def collect_video_formats(metadata: dict[str, Any]) -> list[FormatOption]:
     options: list[FormatOption] = []
+    best_audio_size = pick_best_audio_size(metadata)
     for fmt in metadata.get("formats") or []:
         vcodec = str(fmt.get("vcodec") or "")
         if not vcodec or vcodec == "none":
@@ -177,6 +211,11 @@ def collect_video_formats(metadata: dict[str, Any]) -> list[FormatOption]:
             continue
 
         filesize = fmt.get("filesize") or fmt.get("filesize_approx")
+        video_size = int(filesize) if filesize else None
+        estimated_size = video_size
+        has_audio = str(fmt.get("acodec") or "none") not in {"", "none", "unknown"}
+        if estimated_size is not None and not has_audio and best_audio_size:
+            estimated_size += best_audio_size
         options.append(
             FormatOption(
                 format_id=format_id,
@@ -186,7 +225,8 @@ def collect_video_formats(metadata: dict[str, Any]) -> list[FormatOption]:
                 ext=str(fmt.get("ext") or "-"),
                 vcodec=vcodec,
                 acodec=str(fmt.get("acodec") or "none"),
-                filesize=int(filesize) if filesize else None,
+                filesize=video_size,
+                estimated_filesize=estimated_size,
                 note=str(fmt.get("format_note") or fmt.get("format") or ""),
                 is_h264=is_h264_codec(vcodec),
             )
@@ -199,7 +239,7 @@ def collect_video_formats(metadata: dict[str, Any]) -> list[FormatOption]:
             item.is_h264,
             item.has_audio,
             item.fps,
-            item.filesize or 0,
+            item.estimated_filesize or item.filesize or 0,
         ),
         reverse=True,
     )
@@ -220,7 +260,7 @@ def pick_default_format_index(options: list[FormatOption]) -> int:
             option.width,
             option.has_audio,
             option.fps,
-            option.filesize or 0,
+            option.estimated_filesize or option.filesize or 0,
         )
         if selected_key is None or current_key > selected_key:
             selected = index
@@ -244,7 +284,7 @@ def build_metadata_command(url: str, binaries: BinaryPaths) -> list[str]:
 
 
 def build_download_command(url: str, save_dir: Path, option: FormatOption, binaries: BinaryPaths) -> list[str]:
-    output_template = str(save_dir / "%(title)s [%(id)s].%(ext)s")
+    output_template = str(save_dir / "%(title)s.%(ext)s")
     return [
         str(binaries.yt_dlp),
         "--ignore-config",
@@ -253,7 +293,9 @@ def build_download_command(url: str, save_dir: Path, option: FormatOption, binar
         "--no-playlist",
         "--windows-filenames",
         "--progress-template",
-        "download:PROGRESS|%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s",
+        "download:PROGRESS|%(progress.status)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress._speed_str)s|%(progress._eta_str)s",
+        "--progress-delta",
+        "0.25",
         "--print",
         "after_move:FILE|%(filepath)s",
         "--ffmpeg-location",
@@ -273,10 +315,30 @@ def parse_metadata_output(raw_output: str) -> dict[str, Any]:
 
 
 def parse_progress_line(line: str) -> tuple[int, str, str, str]:
-    _, percent_text, speed_text, eta_text = (line.split("|", 3) + ["", "", "", ""])[:4]
-    match = PERCENT_RE.search(percent_text)
+    parts = (line.split("|", 6) + ["", "", "", "", "", "", ""])[:7]
+    _, status_text, downloaded_text, total_text, total_estimate_text, speed_text, eta_text = parts
+
+    def _to_int(value: str) -> int | None:
+        value = value.strip()
+        if not value or value == "NA":
+            return None
+        try:
+            return int(float(value))
+        except ValueError:
+            return None
+
+    downloaded = _to_int(downloaded_text)
+    total = _to_int(total_text) or _to_int(total_estimate_text)
+    if downloaded is not None and total and total > 0:
+        value = int(max(0, min(downloaded / total * 100, 100)))
+        if status_text.strip().lower() not in {"finished"}:
+            value = min(value, 99)
+        percent_text = f"{downloaded / total * 100:.1f}%"
+        return value, percent_text, speed_text.strip(), eta_text.strip()
+
+    match = PERCENT_RE.search(downloaded_text)
     value = int(float(match.group(1))) if match else 0
-    return value, percent_text.strip(), speed_text.strip(), eta_text.strip()
+    return value, downloaded_text.strip(), speed_text.strip(), eta_text.strip()
 
 
 def decode_subprocess_output(payload: bytes | None) -> str:
