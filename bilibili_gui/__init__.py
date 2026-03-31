@@ -1,0 +1,1 @@
+"""Bilibili desktop downloader GUI."""

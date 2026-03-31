@@ -1,0 +1,177 @@
+from __future__ import annotations
+
+import subprocess
+import threading
+import time
+from pathlib import Path
+from typing import Any
+
+from PySide6 import QtCore
+
+from .core import (
+    CREATE_NO_WINDOW,
+    BinaryPaths,
+    FormatOption,
+    build_subprocess_env,
+    decode_subprocess_output,
+    build_download_command,
+    build_metadata_command,
+    collect_video_formats,
+    parse_metadata_output,
+    parse_progress_line,
+    pick_default_format_index,
+)
+
+
+class MetadataWorker(QtCore.QObject):
+    finished = QtCore.Signal(object, object, int)
+    error = QtCore.Signal(str)
+
+    def __init__(self, url: str, binaries: BinaryPaths) -> None:
+        super().__init__()
+        self.url = url
+        self.binaries = binaries
+
+    @QtCore.Slot()
+    def run(self) -> None:
+        try:
+            completed = subprocess.run(
+                build_metadata_command(self.url, self.binaries),
+                capture_output=True,
+                creationflags=CREATE_NO_WINDOW,
+                env=build_subprocess_env(),
+                check=False,
+            )
+            stdout = decode_subprocess_output(completed.stdout)
+            stderr = decode_subprocess_output(completed.stderr)
+            if completed.returncode != 0:
+                error_text = (stderr or stdout).strip()
+                raise RuntimeError(error_text or "yt-dlp 返回了非 0 状态码")
+
+            payload = parse_metadata_output(stdout)
+            options = collect_video_formats(payload)
+            if not options:
+                raise RuntimeError("没有解析到可下载的视频格式")
+
+            default_index = pick_default_format_index(options)
+            self.finished.emit(payload, options, default_index)
+        except Exception as exc:  # pragma: no cover - UI path
+            self.error.emit(str(exc))
+
+
+class DownloadWorker(QtCore.QObject):
+    progress = QtCore.Signal(int, str, str, str)
+    log = QtCore.Signal(str)
+    completed = QtCore.Signal(str)
+    cancelled = QtCore.Signal()
+    error = QtCore.Signal(str)
+    finished = QtCore.Signal()
+
+    def __init__(
+        self,
+        url: str,
+        save_dir: Path,
+        option: FormatOption,
+        binaries: BinaryPaths,
+        video_id: str = "",
+    ) -> None:
+        super().__init__()
+        self.url = url
+        self.save_dir = save_dir
+        self.option = option
+        self.binaries = binaries
+        self.video_id = video_id
+        self._cancel_event = threading.Event()
+        self._process: subprocess.Popen[bytes] | None = None
+        self._final_path = ""
+        self._started_at = 0.0
+
+    def cancel(self) -> None:
+        self._cancel_event.set()
+        if self._process and self._process.poll() is None:
+            self._process.terminate()
+
+    @QtCore.Slot()
+    def run(self) -> None:
+        try:
+            command = build_download_command(self.url, self.save_dir, self.option, self.binaries)
+            self.log.emit(f"开始下载，格式 {self.option.format_id}，保存到 {self.save_dir}")
+            self._started_at = time.time()
+
+            self._process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                creationflags=CREATE_NO_WINDOW,
+                env=build_subprocess_env(),
+            )
+
+            last_lines: list[str] = []
+            assert self._process.stdout is not None
+
+            for raw_line in self._process.stdout:
+                line = decode_subprocess_output(raw_line).strip()
+                if not line:
+                    continue
+                if line.startswith("PROGRESS|"):
+                    value, percent_text, speed_text, eta_text = parse_progress_line(line)
+                    self.progress.emit(value, percent_text, speed_text, eta_text)
+                    continue
+                if line.startswith("FILE|"):
+                    self._final_path = line.split("|", 1)[1].strip()
+                    continue
+
+                last_lines.append(line)
+                last_lines = last_lines[-10:]
+                self.log.emit(line)
+
+                if self._cancel_event.is_set():
+                    break
+
+            return_code = self._process.wait()
+            if self._cancel_event.is_set():
+                self.cancelled.emit()
+                return
+
+            if return_code != 0:
+                error_text = "\n".join(last_lines) or "yt-dlp 下载失败"
+                raise RuntimeError(error_text)
+
+            self.progress.emit(100, "100%", "完成", "0s")
+            self.completed.emit(self._resolve_final_path())
+        except Exception as exc:  # pragma: no cover - UI path
+            self.error.emit(str(exc))
+        finally:
+            self.finished.emit()
+
+    def _resolve_final_path(self) -> str:
+        if self._final_path and "\ufffd" not in self._final_path:
+            return self._final_path
+
+        candidates: list[Path] = []
+        if self.video_id:
+            candidates.extend(
+                sorted(
+                    self.save_dir.glob(f"* [{self.video_id}].*"),
+                    key=lambda path: path.stat().st_mtime,
+                    reverse=True,
+                )
+            )
+
+        if not candidates:
+            recent_threshold = self._started_at - 2
+            candidates.extend(
+                sorted(
+                    (
+                        path
+                        for path in self.save_dir.iterdir()
+                        if path.is_file() and path.stat().st_mtime >= recent_threshold
+                    ),
+                    key=lambda path: path.stat().st_mtime,
+                    reverse=True,
+                )
+            )
+
+        if candidates:
+            return str(candidates[0])
+        return self._final_path or str(self.save_dir)
