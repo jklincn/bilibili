@@ -18,12 +18,26 @@ from .core import (
 )
 from .workers import DownloadWorker, MetadataWorker
 
+RADIUS_LG = 24
+RADIUS_MD = 16
+RADIUS_SM = 10
+
+WIN32_GWL_STYLE = -16
+WIN32_WS_MINIMIZEBOX = 0x00020000
+WIN32_WS_MAXIMIZEBOX = 0x00010000
+WIN32_WS_SYSMENU = 0x00080000
+WIN32_WS_CAPTION = 0x00C00000
+WIN32_SWP_NOMOVE = 0x0002
+WIN32_SWP_NOSIZE = 0x0001
+WIN32_SWP_NOZORDER = 0x0004
+WIN32_SWP_FRAMECHANGED = 0x0020
+
 
 class AnchoredComboBox(QtWidgets.QComboBox):
     _POPUP_GAP = 8
     _POPUP_SCREEN_MARGIN = 16
     _POPUP_MAX_HEIGHT = 320
-    _RADIUS = 12
+    _RADIUS = RADIUS_SM
     _OUTLINE_INSET = 1.0
     _BOTTOM_LINE_INSET = 14
     _BOTTOM_LINE_Y_OFFSET = 2
@@ -34,7 +48,7 @@ class AnchoredComboBox(QtWidgets.QComboBox):
             return None
         popup.setAttribute(QtCore.Qt.WidgetAttribute.WA_StyledBackground, True)
         popup.setStyleSheet(
-            "background: #ffffff; border: 1px solid #cfe0f5; border-radius: 18px;"
+            f"background: #ffffff; border: 1px solid #cfe0f5; border-radius: {RADIUS_MD}px;"
         )
         return popup
 
@@ -107,6 +121,26 @@ class AnchoredComboBox(QtWidgets.QComboBox):
 
 
 class MainWindow(QtWidgets.QMainWindow):
+    _BASE_COMPACT_WINDOW_WIDTH = 900
+    _BASE_COMPACT_WINDOW_HEIGHT = 400
+    _MINIMUM_WINDOW_WIDTH = 800
+    _MINIMUM_WINDOW_HEIGHT = 390
+    _REFERENCE_SCREEN_WIDTH = 1920
+    _REFERENCE_SCREEN_HEIGHT = 1080
+    _COMPACT_SCALE_MIN = 0.85
+    _COMPACT_SCALE_MAX = 1.65
+    _RESULTS_WINDOW_HEIGHT_PADDING = 8
+    _WINDOW_RESIZE_ANIMATION_MS = 230
+    _HERO_LOGO_TOP_MARGIN = 20
+    _HERO_URL_TOP_SPACING = 60
+    _CONTENT_TOP_GAP = 0
+    _SETTINGS_VERSION = 2
+    _SETTINGS_VERSION_KEY = "settings_version"
+    _SETTINGS_DOWNLOAD_PATH_KEY = "download_path"
+    _SETTINGS_SHOW_LOGS_KEY = "show_logs"
+    _SETTINGS_WINDOW_SIZE_KEY = "window_size"
+    _THEME_ASSET = "main_window.qss"
+
     def __init__(self) -> None:
         super().__init__()
         self.binaries: BinaryPaths = discover_binaries()
@@ -122,22 +156,30 @@ class MainWindow(QtWidgets.QMainWindow):
         self.dependencies_ok = False
         self._initial_center_pending = True
         self.download_path = ""
-        self._base_compact_window_width = 900
-        self._base_compact_window_height = 400
-        self._minimum_window_width = 800
-        self._minimum_window_height = 390
-        self._reference_screen_width = 1920
-        self._reference_screen_height = 1080
-        self._compact_scale_min = 0.85
-        self._compact_scale_max = 1.65
-        self._compact_window_width = self._base_compact_window_width
-        self._compact_window_height = self._base_compact_window_height
-        self._results_window_height_padding = 8
-        self._window_resize_animation_ms = 230
+        self._compact_window_width = self._BASE_COMPACT_WINDOW_WIDTH
+        self._compact_window_height = self._BASE_COMPACT_WINDOW_HEIGHT
         self._window_resize_animation: QtCore.QPropertyAnimation | None = None
-        self._hero_logo_top_margin = 20
-        self._content_top_gap = 0
         self._native_window_styles_applied = False
+        self._minimize_icon = self._load_caption_icon(
+            "window_controls",
+            "minimize.svg",
+            fallback=QtWidgets.QStyle.StandardPixmap.SP_TitleBarMinButton,
+        )
+        self._maximize_icon = self._load_caption_icon(
+            "window_controls",
+            "maximize.svg",
+            fallback=QtWidgets.QStyle.StandardPixmap.SP_TitleBarMaxButton,
+        )
+        self._restore_icon = self._load_caption_icon(
+            "window_controls",
+            "restore.svg",
+            fallback=QtWidgets.QStyle.StandardPixmap.SP_TitleBarNormalButton,
+        )
+        self._close_icon = self._load_caption_icon(
+            "window_controls",
+            "close.svg",
+            fallback=QtWidgets.QStyle.StandardPixmap.SP_TitleBarCloseButton,
+        )
 
         self.setWindowFlags(
             QtCore.Qt.WindowType.Window
@@ -152,7 +194,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setWindowTitle("Bilibili 视频下载器")
         self._refresh_compact_window_size(QtGui.QGuiApplication.primaryScreen())
         self.resize(self._compact_window_width, self._compact_window_height)
-        self.setMinimumSize(self._minimum_window_width, self._minimum_window_height)
+        self.setMinimumSize(self._MINIMUM_WINDOW_WIDTH, self._MINIMUM_WINDOW_HEIGHT)
 
         self._build_ui()
         self._apply_theme()
@@ -178,53 +220,13 @@ class MainWindow(QtWidgets.QMainWindow):
         outer_layout = QtWidgets.QVBoxLayout(self.window_surface)
         outer_layout.setContentsMargins(0, 0, 0, 14)
         outer_layout.setSpacing(8)
-
-        self.title_bar = QtWidgets.QWidget()
-        self.title_bar.setObjectName("TitleBar")
-        self.title_bar.setFixedHeight(40)
-        self.title_bar.installEventFilter(self)
-        title_layout = QtWidgets.QHBoxLayout(self.title_bar)
-        title_layout.setContentsMargins(0, 0, 0, 0)
-        title_layout.setSpacing(0)
-        title_layout.addStretch(1)
-
-        self.minimize_button = QtWidgets.QToolButton()
-        self.minimize_button.setObjectName("CaptionButton")
-        self.minimize_button.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
-        self.minimize_button.clicked.connect(self.showMinimized)
-
-        self.maximize_button = QtWidgets.QToolButton()
-        self.maximize_button.setObjectName("CaptionButton")
-        self.maximize_button.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
-        self.maximize_button.clicked.connect(self._toggle_maximize_restore)
-
-        self.close_button = QtWidgets.QToolButton()
-        self.close_button.setObjectName("CloseCaptionButton")
-        self.close_button.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
-        self.close_button.clicked.connect(self.close)
-
-        title_layout.addWidget(self.minimize_button)
-        title_layout.addWidget(self.maximize_button)
-        title_layout.addWidget(self.close_button)
-        outer_layout.addWidget(self.title_bar)
-
-        top_row = QtWidgets.QHBoxLayout()
-        top_row.setContentsMargins(20, 2, 20, 0)
-
-        self.log_toggle_button = QtWidgets.QPushButton("显示日志")
-        self.log_toggle_button.setObjectName("FloatingLogButton")
-        self.log_toggle_button.setCheckable(True)
-        self.log_toggle_button.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
-        self.log_toggle_button.clicked.connect(self._toggle_log_overlay)
-
-        top_row.addStretch(1)
-        top_row.addWidget(self.log_toggle_button)
-        outer_layout.addLayout(top_row)
+        outer_layout.addWidget(self._build_title_bar())
+        outer_layout.addLayout(self._build_top_row())
 
         self.body_layout = QtWidgets.QVBoxLayout()
         self.body_layout.setContentsMargins(20, 0, 20, 0)
         self.body_layout.setSpacing(0)
-        self.body_layout.addSpacing(self._content_top_gap)
+        self.body_layout.addSpacing(self._CONTENT_TOP_GAP)
 
         self.content_shell = QtWidgets.QWidget()
         self.content_shell.setSizePolicy(
@@ -236,17 +238,79 @@ class MainWindow(QtWidgets.QMainWindow):
             0,
             QtCore.Qt.AlignmentFlag.AlignHCenter,
         )
-        self.body_layout.addStretch(1)
+        self._body_stretch_spacer = QtWidgets.QSpacerItem(
+            0,
+            0,
+            QtWidgets.QSizePolicy.Policy.Minimum,
+            QtWidgets.QSizePolicy.Policy.Expanding,
+        )
+        self.body_layout.addSpacerItem(self._body_stretch_spacer)
         outer_layout.addLayout(self.body_layout, 1)
 
         content_layout = QtWidgets.QVBoxLayout(self.content_shell)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(12)
         self._sync_content_shell_width(self._compact_window_width)
+        content_layout.addWidget(self._build_hero_card())
+        content_layout.addWidget(self._build_info_card())
+        content_layout.addWidget(self._build_controls_card())
 
+        self.log_overlay = self._build_log_overlay()
+
+        self._update_log_overlay_geometry()
+        self._set_results_visible(False)
+
+    def _build_title_bar(self) -> QtWidgets.QWidget:
+        self.title_bar = QtWidgets.QWidget()
+        self.title_bar.setObjectName("TitleBar")
+        self.title_bar.setFixedHeight(40)
+        self.title_bar.installEventFilter(self)
+
+        title_layout = QtWidgets.QHBoxLayout(self.title_bar)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(0)
+        title_layout.addStretch(1)
+
+        self.minimize_button = self._create_caption_button(
+            "CaptionButton",
+            self.showMinimized,
+            "最小化",
+        )
+        self.maximize_button = self._create_caption_button(
+            "CaptionButton",
+            self._toggle_maximize_restore,
+            "最大化或还原",
+        )
+        self.close_button = self._create_caption_button(
+            "CloseCaptionButton",
+            self.close,
+            "关闭",
+        )
+
+        title_layout.addWidget(self.minimize_button)
+        title_layout.addWidget(self.maximize_button)
+        title_layout.addWidget(self.close_button)
+        self._update_caption_button_icons()
+        return self.title_bar
+
+    def _build_top_row(self) -> QtWidgets.QHBoxLayout:
+        top_row = QtWidgets.QHBoxLayout()
+        top_row.setContentsMargins(20, 2, 20, 0)
+
+        self.log_toggle_button = QtWidgets.QPushButton("显示日志")
+        self.log_toggle_button.setObjectName("FloatingLogButton")
+        self.log_toggle_button.setCheckable(True)
+        self.log_toggle_button.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        self.log_toggle_button.clicked.connect(self._toggle_log_overlay)
+
+        top_row.addStretch(1)
+        top_row.addWidget(self.log_toggle_button)
+        return top_row
+
+    def _build_hero_card(self) -> QtWidgets.QFrame:
         self.hero_card = self._make_card("HeroCard")
         hero_layout = QtWidgets.QVBoxLayout(self.hero_card)
-        hero_layout.setContentsMargins(28, self._hero_logo_top_margin, 28, 24)
+        hero_layout.setContentsMargins(28, self._HERO_LOGO_TOP_MARGIN, 28, 24)
         hero_layout.setSpacing(18)
 
         self.hero_logo = QtSvgWidgets.QSvgWidget(str(static_asset("Bilibili_logo_1.svg")))
@@ -257,7 +321,9 @@ class MainWindow(QtWidgets.QMainWindow):
         url_row.setSpacing(14)
 
         self.url_input = QtWidgets.QLineEdit()
-        self.url_input.setPlaceholderText("粘贴 Bilibili 视频链接，例如 https://www.bilibili.com/video/BV...")
+        self.url_input.setPlaceholderText(
+            "粘贴 Bilibili 视频链接，例如 https://www.bilibili.com/video/BV..."
+        )
         self.url_input.setClearButtonEnabled(True)
         self.url_input.returnPressed.connect(self.start_query)
 
@@ -282,12 +348,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.hero_status_bar.hide()
 
         hero_layout.addWidget(self.hero_logo, 0, QtCore.Qt.AlignmentFlag.AlignHCenter)
-        hero_layout.addSpacing(60)
+        hero_layout.addSpacing(self._HERO_URL_TOP_SPACING)
         hero_layout.addLayout(url_row)
         hero_layout.addWidget(self.hero_status_label)
         hero_layout.addWidget(self.hero_status_bar)
-        content_layout.addWidget(self.hero_card)
+        return self.hero_card
 
+    def _build_info_card(self) -> QtWidgets.QFrame:
         self.info_card = self._make_card()
         info_layout = QtWidgets.QVBoxLayout(self.info_card)
         info_layout.setContentsMargins(22, 20, 22, 20)
@@ -327,19 +394,33 @@ class MainWindow(QtWidgets.QMainWindow):
         spec_header.addStretch(1)
         spec_header.addWidget(self.spec_helper_label)
 
-        self.other_specs_combo = AnchoredComboBox()
-        self.other_specs_combo.setObjectName("SpecCombo")
-        self.other_specs_combo.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
-        self.other_specs_combo.setMaxVisibleItems(8)
-        self.other_specs_combo.setSizeAdjustPolicy(
+        self.other_specs_combo = self._build_specs_combo()
+
+        current_spec_layout.addLayout(spec_header)
+        current_spec_layout.addWidget(self.other_specs_combo)
+
+        info_layout.addWidget(self.video_title_prefix)
+        info_layout.addWidget(self.video_title_label)
+        info_layout.addWidget(self.video_meta_label)
+        info_layout.addWidget(self.current_spec_card)
+        self.info_card.hide()
+        return self.info_card
+
+    def _build_specs_combo(self) -> AnchoredComboBox:
+        combo = AnchoredComboBox()
+        combo.setObjectName("SpecCombo")
+        combo.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        combo.setMaxVisibleItems(8)
+        combo.setSizeAdjustPolicy(
             QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
         )
-        self.other_specs_combo.setMinimumContentsLength(22)
-        self.other_specs_combo.setSizePolicy(
+        combo.setMinimumContentsLength(22)
+        combo.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Expanding,
             QtWidgets.QSizePolicy.Policy.Fixed,
         )
-        self.other_specs_combo.setMinimumHeight(42)
+        combo.setMinimumHeight(42)
+
         specs_view = QtWidgets.QListView()
         specs_view.setObjectName("SpecComboPopup")
         specs_view.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
@@ -355,20 +436,12 @@ class MainWindow(QtWidgets.QMainWindow):
         specs_view.setHorizontalScrollBarPolicy(
             QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
-        self.other_specs_combo.setView(specs_view)
-        self.other_specs_combo._style_popup_container()
-        self.other_specs_combo.currentIndexChanged.connect(self._on_other_spec_changed)
+        combo.setView(specs_view)
+        combo._style_popup_container()
+        combo.currentIndexChanged.connect(self._on_other_spec_changed)
+        return combo
 
-        current_spec_layout.addLayout(spec_header)
-        current_spec_layout.addWidget(self.other_specs_combo)
-
-        info_layout.addWidget(self.video_title_prefix)
-        info_layout.addWidget(self.video_title_label)
-        info_layout.addWidget(self.video_meta_label)
-        info_layout.addWidget(self.current_spec_card)
-        self.info_card.hide()
-        content_layout.addWidget(self.info_card)
-
+    def _build_controls_card(self) -> QtWidgets.QFrame:
         self.controls_card = self._make_card()
         controls_layout = QtWidgets.QVBoxLayout(self.controls_card)
         controls_layout.setContentsMargins(22, 16, 22, 14)
@@ -417,13 +490,14 @@ class MainWindow(QtWidgets.QMainWindow):
         controls_layout.addWidget(self.progress_bar)
         controls_layout.addLayout(action_row)
         self.controls_card.hide()
-        content_layout.addWidget(self.controls_card)
+        return self.controls_card
 
-        self.log_overlay = QtWidgets.QFrame(self.central)
-        self.log_overlay.setObjectName("LogOverlay")
-        self.log_overlay.hide()
+    def _build_log_overlay(self) -> QtWidgets.QFrame:
+        overlay = QtWidgets.QFrame(self.central)
+        overlay.setObjectName("LogOverlay")
+        overlay.hide()
 
-        log_layout = QtWidgets.QVBoxLayout(self.log_overlay)
+        log_layout = QtWidgets.QVBoxLayout(overlay)
         log_layout.setContentsMargins(20, 18, 20, 18)
         log_layout.setSpacing(12)
 
@@ -449,17 +523,37 @@ class MainWindow(QtWidgets.QMainWindow):
 
         log_layout.addLayout(log_header)
         log_layout.addWidget(self.log_output, 1)
-
-        self._update_log_overlay_geometry()
-        self._set_results_visible(False)
-        self._sync_caption_buttons()
-        self._update_content_mode(False)
+        return overlay
 
     def _make_card(self, object_name: str = "Card") -> QtWidgets.QFrame:
         card = QtWidgets.QFrame()
         card.setObjectName(object_name)
         card.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
         return card
+
+    def _create_caption_button(
+        self,
+        object_name: str,
+        slot: Any,
+        tool_tip: str,
+    ) -> QtWidgets.QToolButton:
+        button = QtWidgets.QToolButton()
+        button.setObjectName(object_name)
+        button.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        button.setIconSize(QtCore.QSize(14, 14))
+        button.setToolTip(tool_tip)
+        button.clicked.connect(slot)
+        return button
+
+    def _load_caption_icon(
+        self,
+        *parts: str,
+        fallback: QtWidgets.QStyle.StandardPixmap,
+    ) -> QtGui.QIcon:
+        icon_path = static_asset(*parts)
+        if icon_path.exists():
+            return QtGui.QIcon(str(icon_path))
+        return self.style().standardIcon(fallback)
 
     def _toggle_log_overlay(self) -> None:
         self._set_log_visibility(not self.log_overlay.isVisible())
@@ -469,15 +563,29 @@ class MainWindow(QtWidgets.QMainWindow):
             self.showNormal()
         else:
             self.showMaximized()
-        self._sync_caption_buttons()
 
-    def _sync_caption_buttons(self) -> None:
-        self.minimize_button.setText("─")
-        self.maximize_button.setText("❐" if self.isMaximized() else "□")
-        self.close_button.setText("✕")
+    def _update_caption_button_icons(self) -> None:
+        self.minimize_button.setText("")
+        self.maximize_button.setText("")
+        self.close_button.setText("")
+        self.minimize_button.setIcon(self._minimize_icon)
+        self.maximize_button.setIcon(
+            self._restore_icon if self.isMaximized() else self._maximize_icon
+        )
+        self.close_button.setIcon(self._close_icon)
 
     def _update_content_mode(self, results_visible: bool) -> None:
-        self.body_layout.setStretch(2, 2 if not results_visible else 0)
+        self._body_stretch_spacer.changeSize(
+            0,
+            0,
+            QtWidgets.QSizePolicy.Policy.Minimum,
+            (
+                QtWidgets.QSizePolicy.Policy.Expanding
+                if not results_visible
+                else QtWidgets.QSizePolicy.Policy.Fixed
+            ),
+        )
+        self.body_layout.invalidate()
 
     def _set_log_visibility(self, visible: bool) -> None:
         self.log_overlay.setVisible(visible)
@@ -507,7 +615,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def changeEvent(self, event: QtCore.QEvent) -> None:  # pragma: no cover - UI path
         super().changeEvent(event)
         if event.type() == QtCore.QEvent.Type.WindowStateChange:
-            self._sync_caption_buttons()
+            self._update_caption_button_icons()
 
     def showEvent(self, event: QtGui.QShowEvent) -> None:  # pragma: no cover - UI path
         super().showEvent(event)
@@ -539,20 +647,10 @@ class MainWindow(QtWidgets.QMainWindow):
             set_window_long_ptr = user32.SetWindowLongPtrW
             set_window_pos = user32.SetWindowPos
 
-            GWL_STYLE = -16
-            WS_MINIMIZEBOX = 0x00020000
-            WS_MAXIMIZEBOX = 0x00010000
-            WS_SYSMENU = 0x00080000
-            WS_CAPTION = 0x00C00000
-            SWP_NOMOVE = 0x0002
-            SWP_NOSIZE = 0x0001
-            SWP_NOZORDER = 0x0004
-            SWP_FRAMECHANGED = 0x0020
-
-            style = get_window_long_ptr(hwnd, GWL_STYLE)
-            style |= WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU
-            style &= ~WS_CAPTION
-            set_window_long_ptr(hwnd, GWL_STYLE, style)
+            style = get_window_long_ptr(hwnd, WIN32_GWL_STYLE)
+            style |= WIN32_WS_MINIMIZEBOX | WIN32_WS_MAXIMIZEBOX | WIN32_WS_SYSMENU
+            style &= ~WIN32_WS_CAPTION
+            set_window_long_ptr(hwnd, WIN32_GWL_STYLE, style)
             set_window_pos(
                 hwnd,
                 0,
@@ -560,17 +658,21 @@ class MainWindow(QtWidgets.QMainWindow):
                 0,
                 0,
                 0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED,
+                WIN32_SWP_NOMOVE
+                | WIN32_SWP_NOSIZE
+                | WIN32_SWP_NOZORDER
+                | WIN32_SWP_FRAMECHANGED,
             )
         except Exception:
             pass
 
     def _is_caption_control_hit(self, widget: QtWidgets.QWidget | None) -> bool:
+        """Assumes caption controls are already created during __init__ via _build_ui."""
         caption_controls = {
-            getattr(self, "minimize_button", None),
-            getattr(self, "maximize_button", None),
-            getattr(self, "close_button", None),
-            getattr(self, "log_toggle_button", None),
+            self.minimize_button,
+            self.maximize_button,
+            self.close_button,
+            self.log_toggle_button,
         }
         current = widget
         while current is not None:
@@ -704,7 +806,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self, b"geometry", self
             )
 
-        self._window_resize_animation.setDuration(self._window_resize_animation_ms)
+        self._window_resize_animation.setDuration(self._WINDOW_RESIZE_ANIMATION_MS)
         self._window_resize_animation.setStartValue(self.geometry())
         self._window_resize_animation.setEndValue(target_geometry)
         self._window_resize_animation.setEasingCurve(QtCore.QEasingCurve.Type.OutCubic)
@@ -712,26 +814,26 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _refresh_compact_window_size(self, screen: QtGui.QScreen | None) -> None:
         if screen is None:
-            self._compact_window_width = self._base_compact_window_width
-            self._compact_window_height = self._base_compact_window_height
+            self._compact_window_width = self._BASE_COMPACT_WINDOW_WIDTH
+            self._compact_window_height = self._BASE_COMPACT_WINDOW_HEIGHT
             return
 
         available = screen.availableGeometry()
-        width_scale = available.width() / self._reference_screen_width
-        height_scale = available.height() / self._reference_screen_height
+        width_scale = available.width() / self._REFERENCE_SCREEN_WIDTH
+        height_scale = available.height() / self._REFERENCE_SCREEN_HEIGHT
         scale = min(width_scale, height_scale)
-        scale = max(self._compact_scale_min, min(self._compact_scale_max, scale))
+        scale = max(self._COMPACT_SCALE_MIN, min(self._COMPACT_SCALE_MAX, scale))
 
-        target_width = int(round(self._base_compact_window_width * scale))
-        target_height = int(round(self._base_compact_window_height * scale))
-        max_width = max(self._minimum_window_width, available.width() - 80)
-        max_height = max(self._minimum_window_height, available.height() - 80)
+        target_width = int(round(self._BASE_COMPACT_WINDOW_WIDTH * scale))
+        target_height = int(round(self._BASE_COMPACT_WINDOW_HEIGHT * scale))
+        max_width = max(self._MINIMUM_WINDOW_WIDTH, available.width() - 80)
+        max_height = max(self._MINIMUM_WINDOW_HEIGHT, available.height() - 80)
 
         self._compact_window_width = max(
-            self._minimum_window_width, min(target_width, max_width)
+            self._MINIMUM_WINDOW_WIDTH, min(target_width, max_width)
         )
         self._compact_window_height = max(
-            self._minimum_window_height, min(target_height, max_height)
+            self._MINIMUM_WINDOW_HEIGHT, min(target_height, max_height)
         )
         self._sync_content_shell_width(self._compact_window_width)
 
@@ -741,9 +843,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_content_mode(visible)
         if visible:
             self._expand_for_results()
+            self._set_hero_card_plain(False)
         else:
             self._shrink_for_compact()
-        self.hero_card.setProperty("plain", True)
+            self._set_hero_card_plain(True)
+
+    def _set_hero_card_plain(self, plain: bool) -> None:
+        if self.hero_card.property("plain") == plain:
+            return
+        self.hero_card.setProperty("plain", plain)
         self.style().unpolish(self.hero_card)
         self.style().polish(self.hero_card)
         self.hero_card.update()
@@ -769,7 +877,7 @@ class MainWindow(QtWidgets.QMainWindow):
         available = screen.availableGeometry()
         target_height = min(
             max(
-                self.sizeHint().height() + self._results_window_height_padding,
+                self.sizeHint().height() + self._RESULTS_WINDOW_HEIGHT_PADDING,
                 self._compact_window_height,
             ),
             available.height() - 80,
@@ -793,282 +901,37 @@ class MainWindow(QtWidgets.QMainWindow):
             self._resize_window_with_animation(target_width, target_height, animated=True)
 
     def _apply_theme(self) -> None:
-        self.setStyleSheet(
-            """
-            QMainWindow {
-                background: transparent;
-            }
-            QWidget#CentralCanvas {
-                background: transparent;
-            }
-            QFrame#WindowSurface {
-                background: qlineargradient(
-                    x1: 0, y1: 0, x2: 1, y2: 1,
-                    stop: 0 #f8fbff,
-                    stop: 1 #f2f6fd
-                );
-                border: 1px solid rgba(36, 44, 58, 0.22);
-                border-radius: 8px;
-            }
-            QWidget#TitleBar {
-                background: transparent;
-            }
-            QWidget {
-                color: #17324d;
-            }
-            QFrame#Card, QFrame#HeroCard {
-                background: rgba(255, 255, 255, 0.9);
-                border: 1px solid #dbe6f3;
-                border-radius: 28px;
-            }
-            QFrame#HeroCard {
-                background: qlineargradient(
-                    x1: 0, y1: 0, x2: 1, y2: 1,
-                    stop: 0 #ffffff,
-                    stop: 0.65 #f6faff,
-                    stop: 1 #ebf3ff
-                );
-            }
-            QFrame#HeroCard[plain="true"] {
-                background: transparent;
-                border: none;
-            }
-            QFrame#SpecCard {
-                background: transparent;
-                border: none;
-                border-radius: 0;
-            }
-            QFrame#LogOverlay {
-                background: rgba(255, 255, 255, 0.98);
-                border: 1px solid #cfdceb;
-                border-radius: 22px;
-            }
-            QLabel#HeroStatus {
-                color: #5b7490;
-                font-size: 13px;
-            }
-            QLabel#InfoTitle {
-                color: #17324d;
-                font-size: 24px;
-                font-weight: 700;
-            }
-            QLabel#SpecTitle {
-                color: #17324d;
-                font-size: 16px;
-                font-weight: 700;
-            }
-            QLabel#SectionLabel {
-                color: #36506a;
-                font-size: 12px;
-                font-weight: 700;
-                letter-spacing: 1px;
-            }
-            QLabel#FieldLabel {
-                color: #4f6781;
-                font-size: 12px;
-                font-weight: 700;
-                letter-spacing: 1px;
-            }
-            QLabel#InfoMeta {
-                color: #587089;
-                font-size: 13px;
-            }
-            QLabel#StatusLabel {
-                color: #17324d;
-                font-size: 14px;
-                font-weight: 700;
-            }
-            QLabel#StatusValue {
-                color: #17324d;
-                font-size: 13px;
-                font-weight: 700;
-            }
-            QLabel#HintText {
-                color: #6f8499;
-                font-size: 12px;
-            }
+        self.setStyleSheet(self._load_theme_stylesheet())
 
-            QLineEdit, QComboBox, QPlainTextEdit {
-                background: rgba(255, 255, 255, 0.96);
-                border: 1px solid #d7e3f0;
-                border-radius: 18px;
-                color: #17324d;
-                selection-background-color: #d9e8ff;
-                selection-color: #17324d;
-            }
-            QLineEdit, QComboBox {
-                min-height: 48px;
-                padding: 0 18px;
-                font-size: 14px;
-            }
-            QComboBox#SpecCombo {
-                background: rgba(255, 255, 255, 0.95);
-                border: none;
-                border-radius: 12px;
-                padding: 0 12px;
-                font-weight: 600;
-                min-height: 42px;
-                font-size: 13px;
-            }
-            QComboBox#SpecCombo:hover {
-                background: #f9fcff;
-            }
-            QComboBox#SpecCombo:on {
-                background: #ffffff;
-            }
-            QComboBox#SpecCombo:disabled {
-                color: #17324d;
-            }
-            QComboBox::drop-down {
-                border: none;
-                width: 0px;
-            }
-            QComboBox::down-arrow {
-                image: none;
-                width: 0px;
-                height: 0px;
-                border: none;
-                margin: 0;
-            }
-            QListView#SpecComboPopup {
-                background: transparent;
-                border: none;
-                border-radius: 0;
-                outline: 0;
-                padding: 6px;
-                show-decoration-selected: 1;
-            }
-            QListView#SpecComboPopup::item {
-                min-height: 26px;
-                padding: 4px 10px;
-                margin: 1px 0;
-                border-radius: 10px;
-            }
-            QListView#SpecComboPopup::item:hover {
-                background: #f2f7ff;
-            }
-            QListView#SpecComboPopup::item:selected {
-                background: #dfeaff;
-                color: #17324d;
-            }
-            QListView#SpecComboPopup QScrollBar:vertical {
-                background: transparent;
-                width: 10px;
-                margin: 6px 4px 6px 0;
-            }
-            QListView#SpecComboPopup QScrollBar::handle:vertical {
-                background: #c8d7ea;
-                min-height: 32px;
-                border-radius: 5px;
-            }
-            QPlainTextEdit {
-                padding: 12px;
-                font-family: Consolas, "Courier New", monospace;
-                font-size: 11px;
-            }
-            QPushButton {
-                background: rgba(255, 255, 255, 0.85);
-                border: 1px solid #d8e3f0;
-                border-radius: 18px;
-                color: #17324d;
-                min-height: 44px;
-                padding: 0 18px;
-                font-size: 14px;
-                font-weight: 700;
-            }
-            QPushButton:hover {
-                background: #f4f8ff;
-                border-color: #b8d0ed;
-            }
-            QPushButton:pressed {
-                background: #e5f0ff;
-            }
-            QPushButton#PrimaryAction {
-                background: qlineargradient(
-                    x1: 0, y1: 0, x2: 1, y2: 0,
-                    stop: 0 #2f7ff7,
-                    stop: 1 #1f67de
-                );
-                border: 1px solid #2b72e7;
-                color: white;
-            }
-            QPushButton#PrimaryAction:hover {
-                background: qlineargradient(
-                    x1: 0, y1: 0, x2: 1, y2: 0,
-                    stop: 0 #2a74e1,
-                    stop: 1 #1b5cc6
-                );
-                border-color: #2367d6;
-            }
-            QPushButton#FloatingLogButton, QPushButton#OverlayCloseButton {
-                min-height: 36px;
-                padding: 0 16px;
-                font-size: 13px;
-            }
-            QToolButton#CaptionButton, QToolButton#CloseCaptionButton {
-                background: transparent;
-                border: none;
-                border-radius: 0;
-                min-width: 48px;
-                max-width: 48px;
-                min-height: 40px;
-                max-height: 40px;
-                padding: 0;
-                font-family: "Segoe UI Symbol", "Microsoft YaHei UI", "Microsoft JhengHei UI";
-                font-size: 16px;
-                font-weight: 500;
-                color: #2f3f52;
-            }
-            QToolButton#CloseCaptionButton {
-                border-top-right-radius: 8px;
-            }
-            QToolButton#CaptionButton:hover {
-                background: rgba(40, 52, 68, 0.10);
-                color: #18283b;
-            }
-            QToolButton#CaptionButton:pressed {
-                background: rgba(40, 52, 68, 0.16);
-                color: #0f2238;
-            }
-            QToolButton#CloseCaptionButton:hover {
-                background: #e81123;
-                color: white;
-            }
-            QToolButton#CloseCaptionButton:pressed {
-                background: #c50f1f;
-                color: white;
-            }
-            QPushButton:disabled {
-                background: #f3f5f8;
-                color: #98a7b7;
-                border-color: #e2e8f0;
-            }
-            QProgressBar {
-                background: #e4ecf7;
-                border: 1px solid #d5e1ef;
-                border-radius: 7px;
-            }
-            QProgressBar::chunk {
-                background: qlineargradient(
-                    x1: 0, y1: 0, x2: 1, y2: 0,
-                    stop: 0 #2f7ff7,
-                    stop: 1 #20c0d5
-                );
-                border-radius: 7px;
-            }
-            """
-        )
+    def _load_theme_stylesheet(self) -> str:
+        stylesheet = static_asset(self._THEME_ASSET).read_text(encoding="utf-8")
+        tokens = {
+            "__RADIUS_LG__": str(RADIUS_LG),
+            "__RADIUS_MD__": str(RADIUS_MD),
+            "__RADIUS_SM__": str(RADIUS_SM),
+        }
+        for token, value in tokens.items():
+            stylesheet = stylesheet.replace(token, value)
+        return stylesheet
 
     def _restore_settings(self) -> None:
-        download_path = self.settings.value("download_path", type=str)
+        download_path = self.settings.value(
+            self._SETTINGS_DOWNLOAD_PATH_KEY,
+            type=str,
+        )
         if not download_path or not Path(download_path).exists():
             download_path = self._default_save_directory()
         self.download_path = download_path
-        self._set_log_visibility(self.settings.value("show_logs", False, type=bool))
+        self._set_log_visibility(
+            self.settings.value(self._SETTINGS_SHOW_LOGS_KEY, False, type=bool)
+        )
         screen = QtGui.QGuiApplication.primaryScreen()
         self._refresh_compact_window_size(screen)
 
-        size_value = self.settings.value("window_size")
+        if self.settings.value(self._SETTINGS_VERSION_KEY, 0, type=int) != self._SETTINGS_VERSION:
+            return
+
+        size_value = self.settings.value(self._SETTINGS_WINDOW_SIZE_KEY)
         if isinstance(size_value, QtCore.QSize):
             width = size_value.width()
             height = size_value.height()
@@ -1084,23 +947,13 @@ class MainWindow(QtWidgets.QMainWindow):
             width = max(width, self.minimumWidth())
             height = max(height, self.minimumHeight())
 
-            # Shrink previously saved default heights so the window feels less tall.
-            if (size_value.width(), size_value.height()) in {
-                (1080, 760),
-                (1120, 760),
-                (1240, 820),
-                (1360, 720),
-                (1280, 720),
-            }:
-                width = self._compact_window_width
-                height = self._compact_window_height
-
             self.resize(width, height)
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:  # pragma: no cover - UI path
-        self.settings.setValue("download_path", self.download_path)
-        self.settings.setValue("show_logs", self.log_overlay.isVisible())
-        self.settings.setValue("window_size", self.size())
+        self.settings.setValue(self._SETTINGS_DOWNLOAD_PATH_KEY, self.download_path)
+        self.settings.setValue(self._SETTINGS_SHOW_LOGS_KEY, self.log_overlay.isVisible())
+        self.settings.setValue(self._SETTINGS_WINDOW_SIZE_KEY, self.size())
+        self.settings.setValue(self._SETTINGS_VERSION_KEY, self._SETTINGS_VERSION)
         super().closeEvent(event)
 
     def _validate_binaries(self) -> None:
@@ -1114,12 +967,19 @@ class MainWindow(QtWidgets.QMainWindow):
             self.append_log(f"缺少依赖文件: {path}")
 
         self._set_log_visibility(True)
-        self._set_results_visible(True)
-        self.info_card.hide()
+        self._show_dependency_error()
         self.query_button.setEnabled(False)
         self.download_button.setEnabled(False)
         self.progress_label.setText("缺少依赖，请确认 exe 同级 bin 目录中包含 yt-dlp 和 ffmpeg")
         self.download_hint_label.setText("请先补齐依赖后再下载")
+
+    def _show_dependency_error(self) -> None:
+        self.info_card.hide()
+        self.controls_card.show()
+        self._update_content_mode(True)
+        self._set_hero_card_plain(False)
+        self._expand_for_results()
+
     def append_log(self, message: str) -> None:
         timestamp = QtCore.QDateTime.currentDateTime().toString("HH:mm:ss")
         self.log_output.appendPlainText(f"[{timestamp}] {message}")
@@ -1141,7 +1001,7 @@ class MainWindow(QtWidgets.QMainWindow):
         directory = selected[0] if selected else ""
         if directory:
             self.download_path = directory
-            self.settings.setValue("download_path", directory)
+            self.settings.setValue(self._SETTINGS_DOWNLOAD_PATH_KEY, directory)
             return directory
         return ""
 
@@ -1191,13 +1051,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self.query_thread.finished.connect(self._cleanup_query_worker)
         self.query_thread.start()
 
+    def _cleanup_worker(self, thread_attr: str, worker_attr: str) -> None:
+        worker = getattr(self, worker_attr)
+        if worker is not None:
+            worker.deleteLater()
+
+        thread = getattr(self, thread_attr)
+        if thread is not None:
+            thread.deleteLater()
+
+        setattr(self, worker_attr, None)
+        setattr(self, thread_attr, None)
+
     def _cleanup_query_worker(self) -> None:
-        if self.query_worker is not None:
-            self.query_worker.deleteLater()
-        if self.query_thread is not None:
-            self.query_thread.deleteLater()
-        self.query_worker = None
-        self.query_thread = None
+        self._cleanup_worker("query_thread", "query_worker")
         self.query_button.setText("解析视频")
         self.query_button.setEnabled(self.dependencies_ok)
 
@@ -1316,7 +1183,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         save_dir = Path(save_dir_text).expanduser()
         save_dir.mkdir(parents=True, exist_ok=True)
-        self.settings.setValue("download_path", str(save_dir))
+        self.settings.setValue(self._SETTINGS_DOWNLOAD_PATH_KEY, str(save_dir))
 
         url = normalize_video_url(self.url_input.text().strip())
         option = self.formats[selected_index]
@@ -1344,12 +1211,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.download_thread.start()
 
     def _cleanup_download_worker(self) -> None:
-        if self.download_worker is not None:
-            self.download_worker.deleteLater()
-        if self.download_thread is not None:
-            self.download_thread.deleteLater()
-        self.download_worker = None
-        self.download_thread = None
+        self._cleanup_worker("download_thread", "download_worker")
         self.download_button.setEnabled(bool(self.formats) and self.dependencies_ok)
 
     def _on_download_progress(self, value: int, percent_text: str, speed_text: str, eta_text: str) -> None:
