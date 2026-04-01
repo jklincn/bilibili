@@ -15,7 +15,6 @@ $BundleExe = Join-Path $BundleDir "bilibili.exe"
 $SourceBinDir = Join-Path $ProjectRoot "bin"
 $BundleBinDir = Join-Path $BundleDir "bin"
 $ArchivePath = Join-Path $DistRoot $ArchiveName
-$ArchiveHelper = Join-Path $ProjectRoot "scripts\\make_7z.py"
 $IconSource = Join-Path $ProjectRoot "static\\Bilibili_logo_2.webp"
 $IconTarget = Join-Path $ProjectRoot "static\\Bilibili_logo_2.ico"
 $StaticDir = Join-Path $ProjectRoot "static"
@@ -105,19 +104,20 @@ if (-not (Test-Path $SourceBinDir)) {
     throw "Missing source bin directory: $SourceBinDir"
 }
 
-if (-not (Test-Path $ArchiveHelper)) {
-    throw "Missing archive helper script: $ArchiveHelper"
-}
-
 if (-not (Test-Path $IconSource)) {
     throw "Missing icon source file: $IconSource"
 }
 
 $Uv = Resolve-CommandPath -Name "uv"
 $PythonCommand = Resolve-PythonCommand
+$SevenZip = Resolve-7Zip
 
 if (-not $Uv -and $PythonCommand.Count -eq 0) {
     throw "Neither uv nor Python was found in PATH."
+}
+
+if (-not $SevenZip) {
+    throw "7z.exe was not found. Please install 7-Zip and ensure 7z.exe is available in PATH or under Program Files."
 }
 
 Remove-Item $BuildRoot -Recurse -Force -ErrorAction SilentlyContinue
@@ -187,43 +187,12 @@ if ($MissingBinaries.Count -gt 0) {
     throw "Missing required binaries in package: $($MissingBinaries -join ', ')"
 }
 
-$SevenZip = Resolve-7Zip
-if ($SevenZip) {
-    Push-Location $BundleDir
-    try {
-        Invoke-Native @($SevenZip, "a", "-t7z", "-mx=9", $ArchivePath, ".\\*")
-    }
-    finally {
-        Pop-Location
-    }
+Push-Location $BundleDir
+try {
+    Invoke-Native @($SevenZip, "a", "-t7z", "-mx=9", $ArchivePath, ".\\*")
 }
-elseif ($Uv) {
-    Push-Location $ProjectRoot
-    try {
-        Invoke-Native @(
-            $Uv,
-            "run",
-            "--no-project",
-            "--with",
-            "py7zr",
-            "python",
-            $ArchiveHelper,
-            $BundleDir,
-            $ArchivePath
-        )
-    }
-    finally {
-        Pop-Location
-    }
-}
-else {
-    Push-Location $ProjectRoot
-    try {
-        Invoke-Native ($PythonCommand + @($ArchiveHelper, $BundleDir, $ArchivePath))
-    }
-    finally {
-        Pop-Location
-    }
+finally {
+    Pop-Location
 }
 
 Write-Host ""
