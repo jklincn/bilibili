@@ -22,6 +22,9 @@ QWidget#TitleBar {
 
 QWidget {
     color: #17324d;
+    font-family: "Segoe UI";
+    font-size: 13px;
+    font-weight: 500;
 }
 
 QFrame#Card,
@@ -64,8 +67,8 @@ QLabel#HeroStatus {
 
 QLabel#InfoTitle {
     color: #17324d;
-    font-size: 24px;
-    font-weight: 700;
+    font-size: 22px;
+    font-weight: 600;
 }
 
 QLabel#SpecTitle {
@@ -76,16 +79,14 @@ QLabel#SpecTitle {
 
 QLabel#SectionLabel {
     color: #36506a;
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 1px;
+    font-size: 13px;
+    font-weight: 600;
 }
 
 QLabel#FieldLabel {
     color: #4f6781;
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 1px;
+    font-size: 13px;
+    font-weight: 600;
 }
 
 QLabel#InfoMeta {
@@ -95,19 +96,19 @@ QLabel#InfoMeta {
 
 QLabel#StatusLabel {
     color: #17324d;
-    font-size: 14px;
-    font-weight: 700;
+    font-size: 13px;
+    font-weight: 600;
 }
 
 QLabel#StatusValue {
     color: #17324d;
     font-size: 13px;
-    font-weight: 700;
+    font-weight: 600;
 }
 
 QLabel#HintText {
     color: #6f8499;
-    font-size: 12px;
+    font-size: 13px;
 }
 
 QLineEdit,
@@ -125,7 +126,7 @@ QLineEdit,
 QComboBox {
     min-height: 48px;
     padding: 0 18px;
-    font-size: 14px;
+    font-size: 13px;
 }
 
 QComboBox#SpecCombo {
@@ -133,7 +134,7 @@ QComboBox#SpecCombo {
     border: none;
     border-radius: __RADIUS_SM__px;
     padding: 0 12px;
-    font-weight: 600;
+    font-weight: 500;
     min-height: 42px;
     font-size: 13px;
 }
@@ -202,7 +203,6 @@ QListView#SpecComboPopup QScrollBar::handle:vertical {
 
 QPlainTextEdit {
     padding: 12px;
-    font-family: Consolas, "Courier New", monospace;
     font-size: 11px;
 }
 
@@ -213,8 +213,8 @@ QPushButton {
     color: #17324d;
     min-height: 44px;
     padding: 0 18px;
-    font-size: 14px;
-    font-weight: 700;
+    font-size: 13px;
+    font-weight: 600;
 }
 
 QPushButton:hover {

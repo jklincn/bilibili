@@ -58,16 +58,9 @@ def build_application() -> QtWidgets.QApplication:
     app = QtWidgets.QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setWindowIcon(application_icon())
-
-    for family in (
-        "Segoe UI Variable Text",
-        "Microsoft YaHei UI",
-        "Segoe UI",
-        "Arial",
-    ):
-        if family in QtGui.QFontDatabase.families():
-            app.setFont(QtGui.QFont(family, 10))
-            break
+    font = QtGui.QFont("Segoe UI", 10)
+    font.setWeight(QtGui.QFont.Weight.Medium)
+    app.setFont(font)
     return app
 
 
