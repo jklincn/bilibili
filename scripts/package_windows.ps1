@@ -7,10 +7,8 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
-$SpecPath = Join-Path $ProjectRoot "bilibili.spec"
-$IconSource = Join-Path $ProjectRoot "static\\Bilibili_logo_2.webp"
-$IconTarget = Join-Path $ProjectRoot "static\\Bilibili_logo_2.ico"
-$BuildRoot = Join-Path $ProjectRoot "build"
+$BuildRoot = Join-Path $ProjectRoot "build\\nuitka"
+$CompiledDistDir = Join-Path $BuildRoot "main.dist"
 $DistRoot = Join-Path $ProjectRoot "dist"
 $BundleDir = Join-Path $DistRoot "bilibili"
 $BundleExe = Join-Path $BundleDir "bilibili.exe"
@@ -18,6 +16,10 @@ $SourceBinDir = Join-Path $ProjectRoot "bin"
 $BundleBinDir = Join-Path $BundleDir "bin"
 $ArchivePath = Join-Path $DistRoot $ArchiveName
 $ArchiveHelper = Join-Path $ProjectRoot "scripts\\make_7z.py"
+$IconSource = Join-Path $ProjectRoot "static\\Bilibili_logo_2.webp"
+$IconTarget = Join-Path $ProjectRoot "static\\Bilibili_logo_2.ico"
+$StaticDir = Join-Path $ProjectRoot "static"
+$EntryPoint = Join-Path $ProjectRoot "main.py"
 $RequiredBinaries = @("ffmpeg.exe", "yt-dlp.exe")
 
 function Resolve-CommandPath {
@@ -91,8 +93,12 @@ if ($env:OS -ne "Windows_NT") {
     throw "This packaging script must be run on Windows."
 }
 
-if (-not (Test-Path $SpecPath)) {
-    throw "Missing PyInstaller spec file: $SpecPath"
+if (-not (Test-Path $EntryPoint)) {
+    throw "Missing entry point: $EntryPoint"
+}
+
+if (-not (Test-Path $StaticDir)) {
+    throw "Missing static directory: $StaticDir"
 }
 
 if (-not (Test-Path $SourceBinDir)) {
@@ -122,35 +128,54 @@ Push-Location $ProjectRoot
 try {
     if ($Uv) {
         Invoke-Native @($Uv, "run", "python", "scripts\\convert_icon.py", $IconSource, $IconTarget)
-    }
-    else {
-        Invoke-Native ($PythonCommand + @("scripts\\convert_icon.py", $IconSource, $IconTarget))
-    }
-
-    if ($Uv) {
         Invoke-Native @(
             $Uv,
             "run",
-            "--no-project",
             "--with",
-            "pyinstaller",
-            "pyinstaller",
-            "--clean",
-            "--noconfirm",
-            $SpecPath
+            "Nuitka",
+            "python",
+            "-m",
+            "nuitka",
+            "--mode=standalone",
+            "--assume-yes-for-downloads",
+            "--enable-plugins=pyside6",
+            "--windows-console-mode=disable",
+            "--windows-icon-from-ico=$IconTarget",
+            "--include-data-dir=$StaticDir=static",
+            "--output-dir=$BuildRoot",
+            "--output-filename=bilibili.exe",
+            "main.py"
         )
     }
     else {
-        Invoke-Native ($PythonCommand + @("-m", "PyInstaller", "--clean", "--noconfirm", $SpecPath))
+        Invoke-Native ($PythonCommand + @("scripts\\convert_icon.py", $IconSource, $IconTarget))
+        Invoke-Native (
+            $PythonCommand + @(
+                "-m",
+                "nuitka",
+                "--mode=standalone",
+                "--assume-yes-for-downloads",
+                "--enable-plugins=pyside6",
+                "--windows-console-mode=disable",
+                "--windows-icon-from-ico=$IconTarget",
+                "--include-data-dir=$StaticDir=static",
+                "--output-dir=$BuildRoot",
+                "--output-filename=bilibili.exe",
+                "main.py"
+            )
+        )
     }
 }
 finally {
     Pop-Location
 }
 
-if (-not (Test-Path $BundleExe)) {
-    throw "PyInstaller finished, but the packaged exe was not found: $BundleExe"
+if (-not (Test-Path $CompiledDistDir)) {
+    throw "Nuitka finished, but the packaged directory was not found: $CompiledDistDir"
 }
+
+New-Item -ItemType Directory -Force -Path $DistRoot | Out-Null
+Copy-Item -Path $CompiledDistDir -Destination $BundleDir -Recurse -Force
 
 New-Item -ItemType Directory -Force -Path $BundleBinDir | Out-Null
 Get-ChildItem -Path $SourceBinDir -Filter "*.exe" -File | Copy-Item -Destination $BundleBinDir -Force

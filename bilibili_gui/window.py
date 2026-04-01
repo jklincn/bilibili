@@ -84,6 +84,7 @@ class AnchoredComboBox(QtWidgets.QComboBox):
         super().paintEvent(event)
 
         painter = QtGui.QPainter(self)
+        painter.setClipRect(self.rect())
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
         outline_color = self._outline_color()
         painter.setPen(QtGui.QPen(outline_color, 1))
