@@ -4,7 +4,7 @@
 
 ## 使用
 
-点击[此处]()下载 7z 压缩包，解压至任意位置，双击解压目录中 bilibili.exe 即可运行。
+点击[此处](https://github.com/jklincn/bilibili/releases/latest/download/bilibili-windows.7z)下载 7z 压缩包，解压至任意位置，双击解压目录中 bilibili.exe 即可运行。
 
 ## 开发者指南
 
@@ -28,10 +28,11 @@ MainWindow
 
 ### 打包
 
-需手动下载 ffmpeg.exe 以及 yt-dlp.exe 文件至 bin 目录下。
+需手动下载 [ffmpeg.exe](https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.7z) 以及 [yt-dlp.exe](https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe) 文件至 bin 目录下。
 
 Windows 下打包命令
 
 ```
 powershell -ExecutionPolicy Bypass -File scripts\package_windows.ps1
 ```
+
