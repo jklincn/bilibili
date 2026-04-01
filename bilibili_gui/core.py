@@ -151,6 +151,54 @@ def discover_binaries() -> BinaryPaths:
     )
 
 
+def get_yt_dlp_version(binaries: BinaryPaths) -> str:
+    try:
+        completed = subprocess.run(
+            [str(binaries.yt_dlp), "--version"],
+            capture_output=True,
+            creationflags=CREATE_NO_WINDOW,
+            env=build_subprocess_env(),
+            check=False,
+        )
+    except OSError as exc:
+        return f"未知（读取失败: {exc}）"
+
+    version = decode_subprocess_output(completed.stdout).strip()
+    if completed.returncode == 0 and version:
+        return version.splitlines()[0].strip()
+
+    error_text = decode_subprocess_output(completed.stderr).strip()
+    if error_text:
+        return f"未知（读取失败: {error_text.splitlines()[0].strip()}）"
+    return "未知"
+
+
+def get_ffmpeg_version(binaries: BinaryPaths) -> str:
+    try:
+        completed = subprocess.run(
+            [str(binaries.ffmpeg), "-version"],
+            capture_output=True,
+            creationflags=CREATE_NO_WINDOW,
+            env=build_subprocess_env(),
+            check=False,
+        )
+    except OSError as exc:
+        return f"未知（读取失败: {exc}）"
+
+    version_line = decode_subprocess_output(completed.stdout).strip()
+    if completed.returncode == 0 and version_line:
+        first_line = version_line.splitlines()[0].strip()
+        prefix = "ffmpeg version "
+        if first_line.lower().startswith(prefix):
+            return first_line[len(prefix) :].strip()
+        return first_line
+
+    error_text = decode_subprocess_output(completed.stderr).strip()
+    if error_text:
+        return f"未知（读取失败: {error_text.splitlines()[0].strip()}）"
+    return "未知"
+
+
 def humanize_bytes(size: int | float | None) -> str:
     if not size:
         return "大小未知"

@@ -4,7 +4,6 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Any
 
 from PySide6 import QtCore
 
@@ -60,7 +59,7 @@ class MetadataWorker(QtCore.QObject):
 
 
 class DownloadWorker(QtCore.QObject):
-    progress = QtCore.Signal(int, str, str, str)
+    progress = QtCore.Signal(int, str)
     log = QtCore.Signal(str)
     completed = QtCore.Signal(str)
     cancelled = QtCore.Signal()
@@ -87,8 +86,6 @@ class DownloadWorker(QtCore.QObject):
         self._started_at = 0.0
         self._initial_files: set[Path] = set()
         self._last_progress_value = 0
-        self._last_speed_text = ""
-        self._last_eta_text = ""
 
     def cancel(self) -> None:
         self._cancel_event.set()
@@ -100,7 +97,7 @@ class DownloadWorker(QtCore.QObject):
         try:
             command = build_download_command(self.url, self.save_dir, self.option, self.binaries)
             self.log.emit(
-                f"\u5f00\u59cb\u4e0b\u8f7d\uff0c\u683c\u5f0f {self.option.format_id}\uff0c\u4fdd\u5b58\u5230 {self.save_dir}"
+                f"开始下载，格式 {self.option.format_id}，保存到 {self.save_dir}"
             )
             self._started_at = time.time()
             self._initial_files = {
@@ -130,17 +127,11 @@ class DownloadWorker(QtCore.QObject):
                 if progress_line.startswith("download:PROGRESS|"):
                     progress_line = progress_line.split("download:", 1)[1]
                 if progress_line.startswith("PROGRESS|"):
-                    value, percent_text, speed_text, eta_text = parse_progress_line(progress_line)
+                    value, percent_text, _speed_text, _eta_text = parse_progress_line(progress_line)
                     self._last_progress_value = max(self._last_progress_value, value)
-                    if speed_text:
-                        self._last_speed_text = speed_text
-                    if eta_text:
-                        self._last_eta_text = eta_text
                     self.progress.emit(
                         self._last_progress_value,
                         percent_text,
-                        self._last_speed_text,
-                        self._last_eta_text,
                     )
                     continue
 
@@ -164,10 +155,10 @@ class DownloadWorker(QtCore.QObject):
                 return
 
             if return_code != 0:
-                error_text = "\n".join(last_lines) or "yt-dlp \u4e0b\u8f7d\u5931\u8d25"
+                error_text = "\n".join(last_lines) or "yt-dlp 下载失败"
                 raise RuntimeError(error_text)
 
-            self.progress.emit(100, "100%", "\u5b8c\u6210", "0s")
+            self.progress.emit(100, "100%")
             self.completed.emit(self._resolve_final_path())
         except Exception as exc:  # pragma: no cover - UI path
             self.error.emit(str(exc))
@@ -175,7 +166,7 @@ class DownloadWorker(QtCore.QObject):
             self.finished.emit()
 
     def _resolve_final_path(self) -> str:
-        if self._final_path and "\ufffd" not in self._final_path:
+        if self._final_path and "�" not in self._final_path:
             try:
                 if Path(self._final_path).exists():
                     return self._final_path
@@ -233,8 +224,6 @@ class DownloadWorker(QtCore.QObject):
                     self.progress.emit(
                         value,
                         f"{percent:.1f}%",
-                        self._last_speed_text,
-                        self._last_eta_text,
                     )
 
             time.sleep(0.35)

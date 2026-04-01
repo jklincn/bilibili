@@ -60,9 +60,22 @@ QFrame#LogOverlay {
     border-radius: __RADIUS_LG__px;
 }
 
+QPlainTextEdit#LogOutput {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    padding: 8px 10px 10px 10px;
+}
+
 QLabel#HeroStatus {
     color: #5b7490;
     font-size: 13px;
+}
+
+QLabel#QueryStatusText {
+    color: #17324d;
+    font-size: 15px;
+    font-weight: 600;
 }
 
 QLabel#InfoTitle {
@@ -124,7 +137,7 @@ QPlainTextEdit {
 
 QLineEdit,
 QComboBox {
-    min-height: 48px;
+    min-height: 40px;
     padding: 0 18px;
     font-size: 13px;
 }
@@ -203,7 +216,7 @@ QListView#SpecComboPopup QScrollBar::handle:vertical {
 
 QPlainTextEdit {
     padding: 12px;
-    font-size: 11px;
+    font-size: 12px;
 }
 
 QPushButton {
@@ -211,7 +224,7 @@ QPushButton {
     border: 1px solid #d8e3f0;
     border-radius: __RADIUS_MD__px;
     color: #17324d;
-    min-height: 44px;
+    min-height: 40px;
     padding: 0 18px;
     font-size: 13px;
     font-weight: 600;
@@ -245,11 +258,96 @@ QPushButton#PrimaryAction:hover {
     border-color: #2367d6;
 }
 
-QPushButton#FloatingLogButton,
-QPushButton#OverlayCloseButton {
-    min-height: 36px;
-    padding: 0 16px;
+QToolButton#GitHubCaptionButton {
+    background: transparent;
+    border: none;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 0;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    min-width: 40px;
+    max-width: 40px;
+    min-height: 40px;
+    max-height: 40px;
+    padding: 0;
+    margin-left: 0;
+    margin-right: 4px;
+}
+
+QToolButton#GitHubCaptionButton:hover {
+    background: rgba(40, 52, 68, 0.10);
+}
+
+QToolButton#GitHubCaptionButton:pressed {
+    background: rgba(40, 52, 68, 0.16);
+}
+
+QToolButton#LogCaptionButton {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    min-width: 45px;
+    max-width: 45px;
+    min-height: 40px;
+    max-height: 40px;
+    padding: 0 8px;
+    color: #2f3f52;
     font-size: 13px;
+    font-weight: 600;
+}
+
+QToolButton#LogCaptionButton:hover {
+    background: rgba(40, 52, 68, 0.10);
+    color: #18283b;
+}
+
+QToolButton#LogCaptionButton:pressed,
+QToolButton#LogCaptionButton:checked {
+    background: rgba(40, 52, 68, 0.16);
+    color: #0f2238;
+}
+
+QToolButton#OverlayActionButton,
+QToolButton#OverlayCloseCaptionButton {
+    background: transparent;
+    border: none;
+    border-radius: 10px;
+    min-width: 32px;
+    max-width: 32px;
+    min-height: 32px;
+    max-height: 32px;
+    color: #2f3f52;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+QToolButton#OverlayActionButton {
+    padding: 0;
+}
+
+QToolButton#OverlayActionButton:hover {
+    background: rgba(40, 52, 68, 0.10);
+    color: #18283b;
+}
+
+QToolButton#OverlayActionButton:pressed {
+    background: rgba(40, 52, 68, 0.16);
+    color: #0f2238;
+}
+
+QToolButton#OverlayCloseCaptionButton {
+    padding: 0;
+    font-size: 16px;
+}
+
+QToolButton#OverlayCloseCaptionButton:hover {
+    background: #e81123;
+    color: white;
+}
+
+QToolButton#OverlayCloseCaptionButton:pressed {
+    background: #c50f1f;
+    color: white;
 }
 
 QToolButton#CaptionButton,
